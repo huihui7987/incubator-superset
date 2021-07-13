@@ -47,7 +47,8 @@ const propTypes = {
   table_name: PropTypes.string,
   vizType: PropTypes.string.isRequired,
   form_data: PropTypes.object,
-  standalone: PropTypes.bool,
+  ownState: PropTypes.object,
+  standalone: PropTypes.number,
   timeout: PropTypes.number,
   refreshOverlayVisible: PropTypes.bool,
   chart: chartPropShape,
@@ -57,7 +58,8 @@ const propTypes = {
 
 const GUTTER_SIZE_FACTOR = 1.25;
 
-const CHART_PANEL_PADDING = 30;
+const CHART_PANEL_PADDING_HORIZ = 30;
+const CHART_PANEL_PADDING_VERTICAL = 15;
 const HEADER_PADDING = 15;
 
 const STORAGE_KEYS = {
@@ -118,7 +120,7 @@ const ExploreChartPanel = props => {
     refreshMode: 'debounce',
     refreshRate: 300,
   });
-  const { width: chartWidth, ref: chartRef } = useResizeDetector({
+  const { width: chartPanelWidth, ref: chartPanelRef } = useResizeDetector({
     refreshMode: 'debounce',
     refreshRate: 300,
   });
@@ -181,13 +183,18 @@ const ExploreChartPanel = props => {
   };
 
   const renderChart = useCallback(() => {
-    const { chart } = props;
-    const newHeight = calcSectionHeight(splitSizes[0]) - CHART_PANEL_PADDING;
+    const { chart, vizType } = props;
+    const newHeight =
+      vizType === 'filter_box'
+        ? calcSectionHeight(100) - CHART_PANEL_PADDING_VERTICAL
+        : calcSectionHeight(splitSizes[0]) - CHART_PANEL_PADDING_VERTICAL;
+    const chartWidth = chartPanelWidth - CHART_PANEL_PADDING_HORIZ;
     return (
       chartWidth > 0 && (
         <ChartContainer
           width={Math.floor(chartWidth)}
           height={newHeight}
+          ownState={props.ownState}
           annotationData={chart.annotationData}
           chartAlert={chart.chartAlert}
           chartStackTrace={chart.chartStackTrace}
@@ -198,7 +205,6 @@ const ExploreChartPanel = props => {
           errorMessage={props.errorMessage}
           formData={props.form_data}
           onQuery={props.onQuery}
-          owners={props?.slice?.owners}
           queriesResponse={chart.queriesResponse}
           refreshOverlayVisible={props.refreshOverlayVisible}
           setControlValue={props.actions.setControlValue}
@@ -208,20 +214,20 @@ const ExploreChartPanel = props => {
         />
       )
     );
-  }, [calcSectionHeight, chartWidth, props, splitSizes]);
+  }, [calcSectionHeight, chartPanelWidth, props, splitSizes]);
 
   const panelBody = useMemo(
     () => (
-      <div className="panel-body" ref={chartRef}>
+      <div className="panel-body" ref={chartPanelRef}>
         {renderChart()}
       </div>
     ),
-    [chartRef, renderChart],
+    [chartPanelRef, renderChart],
   );
 
   const standaloneChartBody = useMemo(
-    () => <div ref={chartRef}>{renderChart()}</div>,
-    [chartRef, renderChart],
+    () => <div ref={chartPanelRef}>{renderChart()}</div>,
+    [chartPanelRef, renderChart],
   );
 
   if (props.standalone) {
@@ -236,11 +242,11 @@ const ExploreChartPanel = props => {
 
   const header = (
     <ConnectedExploreChartHeader
+      ownState={props.ownState}
       actions={props.actions}
       addHistory={props.addHistory}
       can_overwrite={props.can_overwrite}
       can_download={props.can_download}
-      chartHeight={props.height}
       isStarred={props.isStarred}
       slice={props.slice}
       sliceName={props.sliceName}
@@ -248,6 +254,7 @@ const ExploreChartPanel = props => {
       form_data={props.form_data}
       timeout={props.timeout}
       chart={props.chart}
+      userId={props.userId}
     />
   );
 
@@ -256,7 +263,7 @@ const ExploreChartPanel = props => {
   });
 
   return (
-    <Styles className="panel panel-default chart-container">
+    <Styles className="panel panel-default chart-container" ref={chartPanelRef}>
       <div className="panel-heading" ref={headerRef}>
         {header}
       </div>
@@ -273,10 +280,12 @@ const ExploreChartPanel = props => {
         >
           {panelBody}
           <DataTablesPane
+            ownState={props.ownState}
             queryFormData={props.chart.latestQueryFormData}
             tableSectionHeight={tableSectionHeight}
             onCollapseChange={onCollapseChange}
             chartStatus={props.chart.chartStatus}
+            errorMessage={props.errorMessage}
           />
         </Split>
       )}

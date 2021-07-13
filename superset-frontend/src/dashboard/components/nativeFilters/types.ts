@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { AdhocFilter, DataMask } from '@superset-ui/core';
+
 export interface Column {
   name: string;
   displayName?: string;
@@ -25,11 +27,6 @@ export interface Column {
 export interface Scope {
   rootPath: string[];
   excluded: number[];
-}
-
-export enum FilterType {
-  filter_select = 'filter_select',
-  filter_range = 'filter_range',
 }
 
 /** The target of a filter is the datasource/column being filtered */
@@ -43,20 +40,25 @@ export interface Target {
 }
 
 export interface Filter {
-  allowsMultipleValues: boolean;
   cascadeParentIds: string[];
-  defaultValue: any;
-  currentValue?: any;
-  inverseSelection: boolean;
-  isInstant: boolean;
-  isRequired: boolean;
+  defaultDataMask: DataMask;
   id: string; // randomly generated at filter creation
   name: string;
   scope: Scope;
-  filterType: FilterType;
+  filterType: string;
   // for now there will only ever be one target
   // when multiple targets are supported, change this to Target[]
-  targets: [Target];
+  targets: [Partial<Target>];
+  controlValues: {
+    [key: string]: any;
+  };
+  sortMetric?: string | null;
+  adhoc_filters?: AdhocFilter[];
+  granularity_sqla?: string;
+  time_range?: string;
+  requiredFirst?: boolean;
+  tabsInScope?: string[];
+  chartsInScope?: number[];
 }
 
 export type FilterConfiguration = Filter[];

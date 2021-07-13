@@ -22,19 +22,20 @@ import controlPanel from './controlPanel';
 import transformProps from './transformProps';
 import thumbnail from './images/thumbnail.png';
 
-export default class AntdFilterSelectPlugin extends ChartPlugin {
+export default class FilterSelectPlugin extends ChartPlugin {
   constructor() {
     const metadata = new ChartMetadata({
-      name: t('Select filter plugin'),
-      description: 'Select filter plugin using AntD',
-      behaviors: [Behavior.CROSS_FILTER, Behavior.NATIVE_FILTER],
+      name: t('Select filter'),
+      description: t('Select filter plugin using AntD'),
+      behaviors: [Behavior.INTERACTIVE_CHART, Behavior.NATIVE_FILTER],
+      enableNoResults: false,
       thumbnail,
     });
 
     super({
       buildQuery,
       controlPanel,
-      loadChart: () => import('./AntdSelectFilter'),
+      loadChart: () => import('./SelectFilterPlugin'),
       metadata,
       transformProps,
     });

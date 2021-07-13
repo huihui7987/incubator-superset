@@ -22,19 +22,19 @@ import controlPanel from './controlPanel';
 import transformProps from './transformProps';
 import thumbnail from './images/thumbnail.png';
 
-export default class AntdRangeFilterPlugin extends ChartPlugin {
+export default class RangeFilterPlugin extends ChartPlugin {
   constructor() {
     const metadata = new ChartMetadata({
-      name: t('Range filter plugin'),
-      description: 'Range filter plugin using AntD',
-      behaviors: [Behavior.CROSS_FILTER, Behavior.NATIVE_FILTER],
+      name: t('Range filter'),
+      description: t('Range filter plugin using AntD'),
+      behaviors: [Behavior.INTERACTIVE_CHART, Behavior.NATIVE_FILTER],
       thumbnail,
     });
 
     super({
       buildQuery,
       controlPanel,
-      loadChart: () => import('./AntdRangeFilter'),
+      loadChart: () => import('./RangeFilterPlugin'),
       metadata,
       transformProps,
     });

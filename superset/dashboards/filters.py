@@ -14,7 +14,9 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from typing import Any
+
+# pylint: disable=too-few-public-methods
+from typing import Any, Optional
 
 from flask_appbuilder.security.sqla.models import Role
 from flask_babel import lazy_gettext as _
@@ -29,7 +31,7 @@ from superset.views.base import BaseFilter, get_user_roles, is_user_admin
 from superset.views.base_api import BaseFavoriteFilter
 
 
-class DashboardTitleOrSlugFilter(BaseFilter):  # pylint: disable=too-few-public-methods
+class DashboardTitleOrSlugFilter(BaseFilter):
     name = _("Title or Slug")
     arg_name = "title_or_slug"
 
@@ -45,9 +47,7 @@ class DashboardTitleOrSlugFilter(BaseFilter):  # pylint: disable=too-few-public-
         )
 
 
-class DashboardFavoriteFilter(
-    BaseFavoriteFilter
-):  # pylint: disable=too-few-public-methods
+class DashboardFavoriteFilter(BaseFavoriteFilter):
     """
     Custom filter for the GET list that filters all dashboards that a user has favored
     """
@@ -57,16 +57,16 @@ class DashboardFavoriteFilter(
     model = Dashboard
 
 
-class DashboardFilter(BaseFilter):  # pylint: disable=too-few-public-methods
+class DashboardAccessFilter(BaseFilter):
     """
     List dashboards with the following criteria:
         1. Those which the user owns
         2. Those which the user has favorited
         3. Those which have been published (if they have access to at least one slice)
 
-    If the user is an admin show them all dashboards.
+    If the user is an admin then show all dashboards.
     This means they do not get curation but can still sort by "published"
-    if they wish to see those dashboards which are published first
+    if they wish to see those dashboards which are published first.
     """
 
     def apply(self, query: Query, value: Any) -> Query:
@@ -137,4 +137,24 @@ class DashboardFilter(BaseFilter):  # pylint: disable=too-few-public-methods
             )
         )
 
+        return query
+
+
+class FilterRelatedRoles(BaseFilter):
+    """
+    A filter to allow searching for related roles of a resource.
+
+    Use in the api by adding something like:
+    related_field_filters = {
+      "roles": RelatedFieldFilter("name", FilterRelatedRoles),
+    }
+    """
+
+    name = _("Role")
+    arg_name = "roles"
+
+    def apply(self, query: Query, value: Optional[Any]) -> Query:
+        role_model = security_manager.role_model
+        if value:
+            return query.filter(role_model.name.ilike(f"%{value}%"),)
         return query

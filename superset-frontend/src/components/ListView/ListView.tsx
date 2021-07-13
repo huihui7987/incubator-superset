@@ -18,12 +18,12 @@
  */
 import { t, styled } from '@superset-ui/core';
 import React, { useEffect } from 'react';
-import { Alert } from 'react-bootstrap';
 import { Empty } from 'src/common/components';
+import Alert from 'src/components/Alert';
 import { ReactComponent as EmptyImage } from 'images/empty.svg';
 import cx from 'classnames';
 import Button from 'src/components/Button';
-import Icon from 'src/components/Icon';
+import Icons from 'src/components/Icons';
 import IndeterminateCheckbox from 'src/components/IndeterminateCheckbox';
 import { TableCollection, Pagination } from 'src/components/dataViewCommon';
 import CardCollection from './CardCollection';
@@ -91,15 +91,12 @@ const ListViewStyles = styled.div`
 const BulkSelectWrapper = styled(Alert)`
   border-radius: 0;
   margin-bottom: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  padding-right: ${({ theme }) => theme.gridUnit * 9}px;
   color: #3d3d3d;
   background-color: ${({ theme }) => theme.colors.primary.light4};
 
   .selectedCopy {
     display: inline-block;
-    padding: ${({ theme }) => theme.gridUnit * 4}px 0;
+    padding: ${({ theme }) => theme.gridUnit * 2}px 0;
   }
 
   .deselect-all {
@@ -118,8 +115,8 @@ const BulkSelectWrapper = styled(Alert)`
     position: relative;
   }
 
-  .close {
-    margin: ${({ theme }) => theme.gridUnit * 4}px 0;
+  .ant-alert-close-icon {
+    margin-top: ${({ theme }) => theme.gridUnit * 1.5}px;
   }
 `;
 
@@ -145,7 +142,7 @@ const ViewModeContainer = styled.div`
     display: inline-block;
     border-radius: ${({ theme }) => theme.gridUnit / 2}px;
     padding: ${({ theme }) => theme.gridUnit}px;
-    padding-bottom: 0;
+    padding-bottom: ${({ theme }) => theme.gridUnit * 0.5}px;
 
     &:first-of-type {
       margin-right: ${({ theme }) => theme.gridUnit * 2}px;
@@ -185,7 +182,7 @@ const ViewModeToggle = ({
       }}
       className={cx('toggle-button', { active: mode === 'card' })}
     >
-      <Icon name="card-view" />
+      <Icons.CardView />
     </div>
     <div
       role="button"
@@ -196,7 +193,7 @@ const ViewModeToggle = ({
       }}
       className={cx('toggle-button', { active: mode === 'table' })}
     >
-      <Icon name="list-view" />
+      <Icons.ListView />
     </div>
   </ViewModeContainer>
 );
@@ -330,40 +327,47 @@ function ListView<T extends object = any>({
           {bulkSelectEnabled && (
             <BulkSelectWrapper
               data-test="bulk-select-controls"
-              bsStyle="info"
-              onDismiss={disableBulkSelect}
-            >
-              <div className="selectedCopy" data-test="bulk-select-copy">
-                {renderBulkSelectCopy(selectedFlatRows)}
-              </div>
-              {Boolean(selectedFlatRows.length) && (
+              type="info"
+              closable
+              showIcon={false}
+              onClose={disableBulkSelect}
+              message={
                 <>
-                  <span
-                    data-test="bulk-select-deselect-all"
-                    role="button"
-                    tabIndex={0}
-                    className="deselect-all"
-                    onClick={() => toggleAllRowsSelected(false)}
-                  >
-                    {t('Deselect all')}
-                  </span>
-                  <div className="divider" />
-                  {bulkActions.map(action => (
-                    <Button
-                      data-test="bulk-select-action"
-                      key={action.key}
-                      buttonStyle={action.type}
-                      cta
-                      onClick={() =>
-                        action.onSelect(selectedFlatRows.map(r => r.original))
-                      }
-                    >
-                      {action.name}
-                    </Button>
-                  ))}
+                  <div className="selectedCopy" data-test="bulk-select-copy">
+                    {renderBulkSelectCopy(selectedFlatRows)}
+                  </div>
+                  {Boolean(selectedFlatRows.length) && (
+                    <>
+                      <span
+                        data-test="bulk-select-deselect-all"
+                        role="button"
+                        tabIndex={0}
+                        className="deselect-all"
+                        onClick={() => toggleAllRowsSelected(false)}
+                      >
+                        {t('Deselect all')}
+                      </span>
+                      <div className="divider" />
+                      {bulkActions.map(action => (
+                        <Button
+                          data-test="bulk-select-action"
+                          key={action.key}
+                          buttonStyle={action.type}
+                          cta
+                          onClick={() =>
+                            action.onSelect(
+                              selectedFlatRows.map(r => r.original),
+                            )
+                          }
+                        >
+                          {action.name}
+                        </Button>
+                      ))}
+                    </>
+                  )}
                 </>
-              )}
-            </BulkSelectWrapper>
+              }
+            />
           )}
           {viewMode === 'card' && (
             <CardCollection

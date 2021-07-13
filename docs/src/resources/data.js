@@ -48,7 +48,7 @@ export const pmc = [
     image: 'https://github.com/dpgaspar.png',
   },
   {
-    name: 'Erik Ritker',
+    name: 'Erik Ritter',
     github: 'https://github.com/etr2460',
     image: 'https://github.com/etr2460.png',
   },
@@ -216,6 +216,16 @@ export const Databases = [
     imgName: 'sqllite.png',
   },
   {
+    title: 'Trino',
+    href: 'https://trino.io/',
+    imgName: 'trino2.jpg',
+  },
+  {
+    title: 'Rockset',
+    href: 'https://rockset.com/',
+    imgName: 'rockset.png',
+  },
+  {
     title: 'Vertica',
     href: 'https://www.vertica.com/',
     imgName: 'vertica.png',
@@ -224,5 +234,10 @@ export const Databases = [
     title: 'Hologres',
     href: 'https://www.alibabacloud.com/product/hologres',
     imgName: 'hologres.png',
+  },
+  {
+    title: 'IBM Netezza Performance Server',
+    href: 'https://www.ibm.com/products/netezza',
+    imgName: 'netezza.png',
   },
 ];

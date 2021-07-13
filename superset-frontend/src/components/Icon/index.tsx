@@ -24,6 +24,7 @@ import { ReactComponent as AlertSolidSmallIcon } from 'images/icons/alert_solid_
 import { ReactComponent as BinocularsIcon } from 'images/icons/binoculars.svg';
 import { ReactComponent as BoltIcon } from 'images/icons/bolt.svg';
 import { ReactComponent as BoltSmallIcon } from 'images/icons/bolt_small.svg';
+import { ReactComponent as CrossFilterBadge } from 'images/icons/cross-filter-badge.svg';
 import { ReactComponent as BoltSmallRunIcon } from 'images/icons/bolt_small_run.svg';
 import { ReactComponent as CalendarIcon } from 'images/icons/calendar.svg';
 import { ReactComponent as CancelIcon } from 'images/icons/cancel.svg';
@@ -144,6 +145,7 @@ import { ReactComponent as WarningIcon } from 'images/icons/warning.svg';
 import { ReactComponent as WarningSolidIcon } from 'images/icons/warning_solid.svg';
 import { ReactComponent as XLargeIcon } from 'images/icons/x-large.svg';
 import { ReactComponent as XSmallIcon } from 'images/icons/x-small.svg';
+import { ReactComponent as DefaultDatabaseIcon } from 'images/icons/default_db_image.svg';
 
 export type IconName =
   | 'alert'
@@ -165,6 +167,7 @@ export type IconName =
   | 'caret-right'
   | 'caret-up'
   | 'certified'
+  | 'cross-filter-badge'
   | 'check'
   | 'checkbox-half'
   | 'checkbox-off'
@@ -182,6 +185,7 @@ export type IconName =
   | 'copy'
   | 'cursor-target'
   | 'database'
+  | 'default-database'
   | 'dataset-physical'
   | 'dataset-virtual'
   | 'dataset-virtual-greyscale'
@@ -281,6 +285,7 @@ export const iconsRegistry: Record<
   'alert-solid-small': AlertSolidSmallIcon,
   'bolt-small': BoltSmallIcon,
   'bolt-small-run': BoltSmallRunIcon,
+  'cross-filter-badge': CrossFilterBadge,
   'cancel-solid': CancelSolidIcon,
   'cancel-x': CancelXIcon,
   'card-view': CardViewIcon,
@@ -296,6 +301,7 @@ export const iconsRegistry: Record<
   'circle-check-solid': CircleCheckSolidIcon,
   'color-palette': ColorPaletteIcon,
   'cursor-target': CursorTargeIcon,
+  'default-database': DefaultDatabaseIcon,
   'dataset-physical': DatasetPhysicalIcon,
   'dataset-virtual': DatasetVirtualIcon,
   'dataset-virtual-greyscale': DatasetVirtualGreyscaleIcon,
@@ -405,20 +411,29 @@ export const iconsRegistry: Record<
   warning: WarningIcon,
 };
 
-interface IconProps extends SVGProps<SVGSVGElement> {
+export interface IconProps extends SVGProps<SVGSVGElement> {
   name: IconName;
+  'data-test'?: string;
 }
 
 const Icon = ({
   name,
   color = '#666666',
   viewBox = '0 0 24 24',
+  'data-test': dataTest,
   ...rest
 }: IconProps) => {
   const Component = iconsRegistry[name];
 
   return (
-    <Component color={color} viewBox={viewBox} data-test={name} {...rest} />
+    <Component
+      role="img"
+      aria-label={name}
+      color={color}
+      viewBox={viewBox}
+      data-test={dataTest ?? name}
+      {...rest}
+    />
   );
 };
 

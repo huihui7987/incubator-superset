@@ -27,25 +27,43 @@ import { sliceId as chartId } from '../../../fixtures/mockChartQueries';
 
 describe('getFormDataWithExtraFilters', () => {
   const filterId = 'native-filter-1';
-  const mockArgs: GetFormDataWithExtraFiltersArguments = {
-    chart: {
-      id: chartId,
-      formData: {
-        filters: [
-          {
-            col: 'country_name',
-            op: 'IN',
-            val: ['United States'],
-          },
-        ],
-      },
+  const mockChart = {
+    id: chartId,
+    chartAlert: null,
+    chartStatus: null,
+    chartUpdateEndTime: null,
+    chartUpdateStartTime: 1,
+    lastRendered: 1,
+    latestQueryFormData: {},
+    sliceFormData: null,
+    queryController: null,
+    queriesResponse: null,
+    triggerQuery: false,
+    formData: {
+      viz_type: 'filter_select',
+      filters: [
+        {
+          col: 'country_name',
+          op: 'IN',
+          val: ['United States'],
+        },
+      ],
+      datasource: '123',
     },
+  };
+  const mockArgs: GetFormDataWithExtraFiltersArguments = {
+    chartConfiguration: {},
+    charts: {
+      [chartId as number]: mockChart,
+    },
+    chart: mockChart,
     filters: {
       region: ['Spain'],
       color: ['pink', 'purple'],
     },
     sliceId: chartId,
     nativeFilters: {
+      filterSets: {},
       filters: {
         [filterId]: ({
           id: filterId,
@@ -55,11 +73,13 @@ describe('getFormDataWithExtraFilters', () => {
           },
         } as unknown) as Filter,
       },
-      filtersState: {
-        [filterId]: {
-          id: filterId,
-          extraFormData: {},
-        },
+    },
+    dataMask: {
+      [filterId]: {
+        id: filterId,
+        extraFormData: {},
+        filterState: {},
+        ownState: {},
       },
     },
     layout: (dashboardLayout.present as unknown) as {
