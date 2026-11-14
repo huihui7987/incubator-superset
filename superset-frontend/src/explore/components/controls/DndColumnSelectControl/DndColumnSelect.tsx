@@ -16,20 +16,27 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useCallback, useMemo } from 'react';
-import { tn } from '@superset-ui/core';
-import { ColumnMeta } from '@superset-ui/chart-controls';
-import { isEmpty } from 'lodash';
-import { LabelProps } from 'src/explore/components/controls/DndColumnSelectControl/types';
+import { useCallback, useMemo, useState } from 'react';
+import { t, tn } from '@apache-superset/core/translation';
+import { AdhocColumn, QueryFormColumn, isAdhocColumn } from '@superset-ui/core';
+import { ColumnMeta, isColumnMeta } from '@superset-ui/chart-controls';
+import { isEmpty } from 'lodash-es';
 import DndSelectLabel from 'src/explore/components/controls/DndColumnSelectControl/DndSelectLabel';
 import OptionWrapper from 'src/explore/components/controls/DndColumnSelectControl/OptionWrapper';
 import { OptionSelector } from 'src/explore/components/controls/DndColumnSelectControl/utils';
 import { DatasourcePanelDndItem } from 'src/explore/components/DatasourcePanel/types';
 import { DndItemType } from 'src/explore/components/DndItemType';
-import { StyledColumnOption } from 'src/explore/components/optionRenderers';
-import { useComponentDidUpdate } from 'src/common/hooks/useComponentDidUpdate';
+import ColumnSelectPopoverTrigger from './ColumnSelectPopoverTrigger';
+import { DndControlProps } from './types';
+import { datasetLabelLower } from 'src/features/semanticLayers/label';
 
-export const DndColumnSelect = (props: LabelProps) => {
+export type DndColumnSelectProps = DndControlProps<QueryFormColumn> & {
+  options: ColumnMeta[];
+  isTemporal?: boolean;
+  disabledTabs?: Set<string>;
+};
+
+function DndColumnSelect(props: DndColumnSelectProps) {
   const {
     value,
     options,
@@ -39,38 +46,23 @@ export const DndColumnSelect = (props: LabelProps) => {
     ghostButtonText,
     name,
     label,
+    isTemporal,
+    disabledTabs,
   } = props;
-  const optionSelector = useMemo(
-    () => new OptionSelector(options, multi, value),
-    [multi, options, value],
-  );
 
-  // synchronize values in case of dataset changes
-  const handleOptionsChange = useCallback(() => {
-    const optionSelectorValues = optionSelector.getValues();
-    if (typeof value !== typeof optionSelectorValues) {
-      onChange(optionSelectorValues);
-    }
-    if (
-      typeof value === 'string' &&
-      typeof optionSelectorValues === 'string' &&
-      value !== optionSelectorValues
-    ) {
-      onChange(optionSelectorValues);
-    }
-    if (
-      Array.isArray(optionSelectorValues) &&
-      Array.isArray(value) &&
-      (optionSelectorValues.length !== value.length ||
-        optionSelectorValues.every((val, index) => val === value[index]))
-    ) {
-      onChange(optionSelectorValues);
-    }
-  }, [JSON.stringify(value), JSON.stringify(optionSelector.getValues())]);
+  // Provider-specific mode rules (for example semantic views disabling
+  // Custom SQL) live in the picker-capability adapter consumed by
+  // ColumnSelectPopover; this wrapper only forwards caller-specified tabs.
 
-  // useComponentDidUpdate to avoid running this for the first render, to avoid
-  // calling onChange when the initial value is not valid for the dataset
-  useComponentDidUpdate(handleOptionsChange);
+  const [newColumnPopoverVisible, setNewColumnPopoverVisible] = useState(false);
+
+  const optionSelector = useMemo(() => {
+    const optionsMap = Object.fromEntries(
+      options.map(option => [option.column_name, option]),
+    );
+
+    return new OptionSelector(optionsMap, multi, value);
+  }, [multi, options, value]);
 
   const onDrop = useCallback(
     (item: DatasourcePanelDndItem) => {
@@ -95,6 +87,33 @@ export const DndColumnSelect = (props: LabelProps) => {
     [optionSelector],
   );
 
+  const onDropFolder = useCallback(
+    (items: DatasourcePanelDndItem[]) => {
+      // Items already passed `canDrop` (in options, not already selected).
+      const columnNames = items
+        .filter(item => item.type === DndItemType.Column)
+        .map(item => (item.value as ColumnMeta).column_name);
+      if (columnNames.length === 0) {
+        return;
+      }
+      if (!optionSelector.multi) {
+        if (!isEmpty(optionSelector.values)) {
+          optionSelector.replace(0, columnNames[0]);
+        } else {
+          optionSelector.add(columnNames[0]);
+        }
+      } else {
+        columnNames.forEach(columnName => {
+          if (!optionSelector.has(columnName)) {
+            optionSelector.add(columnName);
+          }
+        });
+      }
+      onChange(optionSelector.getValues());
+    },
+    [onChange, optionSelector],
+  );
+
   const onClickClose = useCallback(
     (index: number) => {
       optionSelector.del(index);
@@ -105,7 +124,7 @@ export const DndColumnSelect = (props: LabelProps) => {
 
   const onShiftOptions = useCallback(
     (dragIndex: number, hoverIndex: number) => {
-      optionSelector.swap(dragIndex, hoverIndex);
+      optionSelector.move(dragIndex, hoverIndex);
       onChange(optionSelector.getValues());
     },
     [onChange, optionSelector],
@@ -113,40 +132,126 @@ export const DndColumnSelect = (props: LabelProps) => {
 
   const valuesRenderer = useCallback(
     () =>
-      optionSelector.values.map((column, idx) => (
-        <OptionWrapper
-          key={idx}
-          index={idx}
-          clickClose={onClickClose}
-          onShiftOptions={onShiftOptions}
-          type={`${DndItemType.ColumnOption}_${name}_${label}`}
-          canDelete={canDelete}
-        >
-          <StyledColumnOption column={column} showType />
-        </OptionWrapper>
-      )),
+      optionSelector.values.map((column, idx) => {
+        const datasourceWarningMessage =
+          isAdhocColumn(column) && column.datasourceWarning
+            ? t(
+                'This column might be incompatible with current %s',
+                datasetLabelLower(),
+              )
+            : undefined;
+        const withCaret = isAdhocColumn(column) || !column.error_text;
+
+        return (
+          <ColumnSelectPopoverTrigger
+            key={idx}
+            columns={options}
+            onColumnEdit={newColumn => {
+              if (isColumnMeta(newColumn)) {
+                optionSelector.replace(idx, newColumn.column_name);
+              } else {
+                optionSelector.replace(idx, newColumn as AdhocColumn);
+              }
+              onChange(optionSelector.getValues());
+            }}
+            editedColumn={column}
+            isTemporal={isTemporal}
+            disabledTabs={disabledTabs}
+          >
+            <OptionWrapper
+              key={idx}
+              index={idx}
+              clickClose={onClickClose}
+              onShiftOptions={onShiftOptions}
+              type={`${DndItemType.ColumnOption}_${name}_${label}`}
+              canDelete={canDelete}
+              column={column}
+              datasourceWarningMessage={datasourceWarningMessage}
+              withCaret={withCaret}
+            />
+          </ColumnSelectPopoverTrigger>
+        );
+      }),
     [
       canDelete,
+      isTemporal,
       label,
       name,
+      onChange,
       onClickClose,
       onShiftOptions,
-      optionSelector.values,
+      optionSelector,
+      options,
     ],
   );
 
-  return (
-    <DndSelectLabel<string | string[], ColumnMeta[]>
-      onDrop={onDrop}
-      canDrop={canDrop}
-      valuesRenderer={valuesRenderer}
-      accept={DndItemType.Column}
-      displayGhostButton={multi || optionSelector.values.length === 0}
-      ghostButtonText={
-        ghostButtonText ||
-        tn('Drop column here', 'Drop columns here', multi ? 2 : 1)
+  const addNewColumnWithPopover = useCallback(
+    (newColumn: ColumnMeta | AdhocColumn) => {
+      if (isColumnMeta(newColumn)) {
+        optionSelector.add(newColumn.column_name);
+      } else {
+        optionSelector.add(newColumn as AdhocColumn);
       }
-      {...props}
-    />
+      onChange(optionSelector.getValues());
+    },
+    [onChange, optionSelector],
   );
-};
+
+  const togglePopover = useCallback((visible: boolean) => {
+    setNewColumnPopoverVisible(visible);
+  }, []);
+
+  const closePopover = useCallback(() => {
+    togglePopover(false);
+  }, [togglePopover]);
+
+  const openPopover = useCallback(() => {
+    togglePopover(true);
+  }, [togglePopover]);
+
+  const labelGhostButtonText = useMemo(
+    () =>
+      ghostButtonText ??
+      tn(
+        'Drop a column here or click',
+        'Drop columns here or click',
+        multi ? 2 : 1,
+      ),
+    [ghostButtonText, multi],
+  );
+
+  // Generate sortable type that matches OptionWrapper's type
+  const sortableType = `${DndItemType.ColumnOption}_${name}_${label}`;
+
+  return (
+    <div>
+      <DndSelectLabel
+        onDrop={onDrop}
+        canDrop={canDrop}
+        onDropFolder={onDropFolder}
+        valuesRenderer={valuesRenderer}
+        accept={[DndItemType.Column, DndItemType.Folder]}
+        displayGhostButton={multi || optionSelector.values.length === 0}
+        ghostButtonText={labelGhostButtonText}
+        onClickGhostButton={openPopover}
+        sortableType={sortableType}
+        itemCount={optionSelector.values.length}
+        {...props}
+      />
+      <ColumnSelectPopoverTrigger
+        columns={options}
+        onColumnEdit={addNewColumnWithPopover}
+        isControlledComponent
+        togglePopover={togglePopover}
+        closePopover={closePopover}
+        visible={newColumnPopoverVisible}
+        isTemporal={isTemporal}
+        disabledTabs={disabledTabs}
+      >
+        <div />
+      </ColumnSelectPopoverTrigger>
+    </div>
+  );
+}
+
+export { DndColumnSelect };

@@ -16,294 +16,326 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useEffect, useMemo, useState } from 'react';
-import { styled, t } from '@superset-ui/core';
-import Collapse from 'src/components/Collapse';
-import { ControlConfig, DatasourceMeta } from '@superset-ui/chart-controls';
-import { debounce } from 'lodash';
+import { useContext, useDeferredValue, useMemo, useState } from 'react';
+import { t } from '@apache-superset/core/translation';
+import { DatasourceType, Metric, QueryFormData } from '@superset-ui/core';
+import { Alert } from '@apache-superset/core/components';
+import { css, styled, useTheme } from '@apache-superset/core/theme';
+
+import { ControlConfig } from '@superset-ui/chart-controls';
+import { AutoSizer } from 'react-virtualized-auto-sizer';
+
 import { matchSorter, rankings } from 'match-sorter';
-import { FAST_DEBOUNCE } from 'src/constants';
-import { FeatureFlag, isFeatureEnabled } from 'src/featureFlags';
+import { Input } from '@superset-ui/core/components';
+import { SaveDatasetModal } from 'src/SqlLab/components/SaveDatasetModal';
+import { getDatasourceAsSaveableDataset } from 'src/utils/datasourceUtils';
 import { ExploreActions } from 'src/explore/actions/exploreActions';
 import Control from 'src/explore/components/Control';
-import DatasourcePanelDragWrapper from './DatasourcePanelDragWrapper';
 import { DndItemType } from '../DndItemType';
-import { StyledColumnOption, StyledMetricOption } from '../optionRenderers';
+import { DatasourceFolder, DatasourcePanelColumn, DndItemValue } from './types';
+import { DropzoneContext } from '../ExploreContainer';
+import { DatasourceItems } from './DatasourceItems';
+import { transformDatasourceWithFolders } from './transformDatasourceFolders';
 
-interface DatasourceControl extends ControlConfig {
-  datasource?: DatasourceMeta;
+interface DatasourceControl extends Omit<ControlConfig, 'hidden'> {
+  datasource?: IDatasource;
+}
+export interface IDatasource {
+  metrics: Metric[];
+  columns: DatasourcePanelColumn[];
+  folders?: DatasourceFolder[];
+  id: number;
+  type: DatasourceType;
+  database: {
+    id: number;
+  };
+  sql?: string | null;
+  datasource_name?: string | null;
+  name?: string | null;
+  catalog?: string | null;
+  schema?: string | null;
 }
 
 export interface Props {
-  datasource: DatasourceMeta;
+  datasource: IDatasource;
   controls: {
     datasource: DatasourceControl;
   };
   actions: Partial<ExploreActions> & Pick<ExploreActions, 'setControlValue'>;
+  // we use this props control force update when this panel resize
+  width: number;
+  formData?: QueryFormData;
 }
 
-const Button = styled.button`
-  background: none;
-  border: none;
-  text-decoration: underline;
-  color: ${({ theme }) => theme.colors.primary.dark1};
-`;
-
-const ButtonContainer = styled.div`
-  text-align: center;
-  padding-top: 2px;
-`;
-
 const DatasourceContainer = styled.div`
-  background-color: ${({ theme }) => theme.colors.grayscale.light4};
-  position: relative;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  max-height: 100%;
-  .ant-collapse {
-    height: auto;
-  }
-  .field-selections {
-    padding: ${({ theme }) => `0 0 ${4 * theme.gridUnit}px`};
-    overflow: auto;
-  }
-  .field-length {
-    margin-bottom: ${({ theme }) => theme.gridUnit * 2}px;
-    font-size: ${({ theme }) => theme.typography.sizes.s}px;
-    color: ${({ theme }) => theme.colors.grayscale.light1};
-  }
-  .form-control.input-md {
-    width: calc(100% - ${({ theme }) => theme.gridUnit * 4}px);
-    margin: ${({ theme }) => theme.gridUnit * 2}px auto;
-  }
-  .type-label {
-    font-weight: ${({ theme }) => theme.typography.weights.light};
-    font-size: ${({ theme }) => theme.typography.sizes.s}px;
-    color: ${({ theme }) => theme.colors.grayscale.base};
-  }
-  .Control {
-    padding-bottom: 0;
-  }
+  ${({ theme }) => css`
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    max-height: 100%;
+    .field-selections {
+      padding: 0 0 ${theme.sizeUnit}px;
+      overflow: auto;
+      height: 100%;
+    }
+    .field-length {
+      margin-bottom: ${theme.sizeUnit * 2}px;
+      font-size: ${theme.fontSizeSM}px;
+      color: ${theme.colorTextTertiary};
+    }
+    .form-control.input-md {
+      display: inline-flex;
+      width: calc(100% - ${theme.sizeUnit * 8}px);
+      height: ${theme.sizeUnit * 8}px;
+      margin: ${theme.sizeUnit * 2}px auto;
+    }
+    .type-label {
+      font-size: ${theme.fontSizeSM}px;
+      color: ${theme.colorTextSecondary};
+    }
+    .Control {
+      padding-bottom: 0;
+    }
+  `};
 `;
 
-const LabelContainer = styled.div`
-  overflow: hidden;
-  text-overflow: ellipsis;
+const StyledInfoboxWrapper = styled.div`
+  ${({ theme }) => css`
+    margin: 0 ${theme.sizeUnit * 2.5}px;
 
-  & > span {
-    white-space: nowrap;
-  }
-
-  .option-label {
-    display: inline;
-  }
-
-  .metric-option {
-    & > svg {
-      min-width: ${({ theme }) => `${theme.gridUnit * 4}px`};
+    span {
+      text-decoration: underline;
     }
-    & > .option-label {
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-  }
+  `}
 `;
 
-const enableExploreDnd = isFeatureEnabled(
-  FeatureFlag.ENABLE_EXPLORE_DRAG_AND_DROP,
-);
+const BORDER_WIDTH = 2;
+
+const sortColumns = (slice: DatasourcePanelColumn[]) =>
+  [...slice]
+    .sort((col1, col2) => {
+      if (col1?.is_dttm && !col2?.is_dttm) {
+        return -1;
+      }
+      if (col2?.is_dttm && !col1?.is_dttm) {
+        return 1;
+      }
+      return (col1?.column_name ?? '').localeCompare(col2?.column_name ?? '');
+    })
+    .sort((a, b) => (b?.is_certified ?? 0) - (a?.is_certified ?? 0));
 
 export default function DataSourcePanel({
   datasource,
+  formData,
   controls: { datasource: datasourceControl },
   actions,
+  width,
 }: Props) {
-  const { columns: _columns, metrics } = datasource;
+  const [dropzones] = useContext(DropzoneContext);
+  const { columns: _columns, metrics, folders: _folders } = datasource;
 
-  // display temporal column first
-  const columns = useMemo(
-    () =>
-      [..._columns].sort((col1, col2) => {
-        if (col1.is_dttm && !col2.is_dttm) {
-          return -1;
-        }
-        if (col2.is_dttm && !col1.is_dttm) {
-          return 1;
-        }
-        return 0;
-      }),
-    [_columns],
+  const allowedColumns = useMemo(() => {
+    const validators = Object.values(dropzones);
+    if (!Array.isArray(_columns)) return [];
+    return _columns.filter(column =>
+      validators.some(validator =>
+        validator({
+          value: column as DndItemValue,
+          type: DndItemType.Column,
+        }),
+      ),
+    );
+  }, [dropzones, _columns]);
+
+  const allowedMetrics = useMemo(() => {
+    const validators = Object.values(dropzones);
+    return metrics.filter(metric =>
+      validators.some(validator =>
+        validator({ value: metric, type: DndItemType.Metric }),
+      ),
+    );
+  }, [dropzones, metrics]);
+
+  const [showSaveDatasetModal, setShowSaveDatasetModal] = useState(false);
+  const [inputValue, setInputValue] = useState('');
+  const searchKeyword = useDeferredValue(inputValue);
+
+  const filteredColumns = useMemo(() => {
+    if (!searchKeyword) {
+      return allowedColumns ?? [];
+    }
+    return matchSorter(allowedColumns, searchKeyword, {
+      keys: [
+        {
+          key: 'verbose_name',
+          threshold: rankings.CONTAINS,
+        },
+        {
+          key: 'column_name',
+          threshold: rankings.CONTAINS,
+        },
+        {
+          key: item =>
+            [item?.description ?? '', item?.expression ?? ''].map(
+              x => x?.replace(/[_\n\s]+/g, ' ') || '',
+            ),
+          threshold: rankings.CONTAINS,
+          maxRanking: rankings.CONTAINS,
+        },
+      ],
+      keepDiacritics: true,
+    });
+  }, [allowedColumns, searchKeyword]);
+
+  const filteredMetrics = useMemo(() => {
+    if (!searchKeyword) {
+      return [...(allowedMetrics ?? [])].sort((a, b) =>
+        (a?.metric_name ?? '').localeCompare(b?.metric_name ?? ''),
+      );
+    }
+    return matchSorter(allowedMetrics, searchKeyword, {
+      keys: [
+        {
+          key: 'verbose_name',
+          threshold: rankings.CONTAINS,
+        },
+        {
+          key: 'metric_name',
+          threshold: rankings.CONTAINS,
+        },
+        {
+          key: item =>
+            [item?.description ?? '', item?.expression ?? ''].map(
+              x => x?.replace(/[_\n\s]+/g, ' ') || '',
+            ),
+          threshold: rankings.CONTAINS,
+          maxRanking: rankings.CONTAINS,
+        },
+      ],
+      keepDiacritics: true,
+      baseSort: (a, b) =>
+        Number(b?.item?.is_certified ?? 0) -
+          Number(a?.item?.is_certified ?? 0) ||
+        String(a?.rankedValue ?? '').localeCompare(b?.rankedValue ?? ''),
+    });
+  }, [allowedMetrics, searchKeyword]);
+
+  const sortedColumns = useMemo(
+    () => sortColumns(filteredColumns),
+    [filteredColumns],
   );
 
-  const [inputValue, setInputValue] = useState('');
-  const [lists, setList] = useState({
-    columns,
-    metrics,
-  });
-  const [showAllMetrics, setShowAllMetrics] = useState(false);
-  const [showAllColumns, setShowAllColumns] = useState(false);
+  const folders = useMemo(
+    () =>
+      transformDatasourceWithFolders(
+        filteredMetrics,
+        sortedColumns,
+        _folders,
+        allowedMetrics,
+        allowedColumns,
+      ),
+    [_folders, filteredMetrics, sortedColumns],
+  );
 
-  const DEFAULT_MAX_COLUMNS_LENGTH = 50;
-  const DEFAULT_MAX_METRICS_LENGTH = 50;
-
-  const search = debounce((value: string) => {
-    if (value === '') {
-      setList({ columns, metrics });
-      return;
+  const showInfoboxCheck = () => {
+    try {
+      if (sessionStorage.getItem('showInfobox') === 'false') return false;
+    } catch (error) {
+      // continue regardless of error
     }
-    setList({
-      columns: matchSorter(columns, value, {
-        keys: [
-          {
-            key: 'verbose_name',
-            threshold: rankings.CONTAINS,
-          },
-          {
-            key: 'column_name',
-            threshold: rankings.CONTAINS,
-          },
-          {
-            key: item =>
-              [item.description, item.expression].map(
-                x => x?.replace(/[_\n\s]+/g, ' ') || '',
-              ),
-            threshold: rankings.CONTAINS,
-            maxRanking: rankings.CONTAINS,
-          },
-        ],
-        keepDiacritics: true,
-      }),
-      metrics: matchSorter(metrics, value, {
-        keys: [
-          {
-            key: 'verbose_name',
-            threshold: rankings.CONTAINS,
-          },
-          {
-            key: 'metric_name',
-            threshold: rankings.CONTAINS,
-          },
-          {
-            key: item =>
-              [item.description, item.expression].map(
-                x => x?.replace(/[_\n\s]+/g, ' ') || '',
-              ),
-            threshold: rankings.CONTAINS,
-            maxRanking: rankings.CONTAINS,
-          },
-        ],
-        keepDiacritics: true,
-        baseSort: (a, b) =>
-          Number(b.item.is_certified) - Number(a.item.is_certified) ||
-          String(a.rankedValue).localeCompare(b.rankedValue),
-      }),
-    });
-  }, FAST_DEBOUNCE);
+    return true;
+  };
 
-  useEffect(() => {
-    setList({
-      columns,
-      metrics,
-    });
-    setInputValue('');
-  }, [columns, datasource, metrics]);
+  const saveableDatasets = {
+    query: DatasourceType.Query,
+    saved_query: DatasourceType.SavedQuery,
+  };
 
-  const metricSlice = showAllMetrics
-    ? lists.metrics
-    : lists.metrics.slice(0, DEFAULT_MAX_COLUMNS_LENGTH);
-  const columnSlice = showAllColumns
-    ? lists.columns
-    : lists.columns.slice(0, DEFAULT_MAX_METRICS_LENGTH);
+  const datasourceIsSaveable =
+    datasource.type &&
+    saveableDatasets[datasource.type as keyof typeof saveableDatasets];
 
-  const mainBody = (
-    <>
-      <input
-        type="text"
-        onChange={evt => {
-          setInputValue(evt.target.value);
-          search(evt.target.value);
-        }}
-        value={inputValue}
-        className="form-control input-md"
-        placeholder={t('Search Metrics & Columns')}
-      />
-      <div className="field-selections">
-        <Collapse
-          bordered
-          defaultActiveKey={['metrics', 'column']}
-          expandIconPosition="right"
-          ghost
-        >
-          <Collapse.Panel
-            header={<span className="header">{t('Metrics')}</span>}
-            key="metrics"
-          >
-            <div className="field-length">
-              {t(`Showing %s of %s`, metricSlice.length, lists.metrics.length)}
-            </div>
-            {metricSlice.map(m => (
-              <LabelContainer key={m.metric_name} className="column">
-                {enableExploreDnd ? (
-                  <DatasourcePanelDragWrapper
-                    value={m}
-                    type={DndItemType.Metric}
-                  >
-                    <StyledMetricOption metric={m} showType />
-                  </DatasourcePanelDragWrapper>
-                ) : (
-                  <StyledMetricOption metric={m} showType />
-                )}
-              </LabelContainer>
-            ))}
-            {lists.metrics.length > DEFAULT_MAX_METRICS_LENGTH ? (
-              <ButtonContainer>
-                <Button onClick={() => setShowAllMetrics(!showAllMetrics)}>
-                  {showAllMetrics ? t('Show less...') : t('Show all...')}
-                </Button>
-              </ButtonContainer>
-            ) : (
-              <></>
+  const theme = useTheme();
+  const mainBody = useMemo(
+    () => (
+      <>
+        <div style={{ padding: theme.sizeUnit * 4 }}>
+          <Input
+            allowClear
+            onChange={evt => {
+              setInputValue(evt.target.value);
+            }}
+            value={inputValue}
+            placeholder={t('Search Metrics & Columns')}
+          />
+        </div>
+        <div className="field-selections" data-test="fieldSelections">
+          {datasourceIsSaveable && showInfoboxCheck() && (
+            <StyledInfoboxWrapper>
+              <Alert
+                closable
+                onClose={() => {
+                  try {
+                    sessionStorage.setItem('showInfobox', 'false');
+                  } catch (error) {
+                    // continue regardless of error
+                  }
+                }}
+                type="info"
+                message=""
+                description={
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowSaveDatasetModal(true)}
+                      className="add-dataset-alert-description"
+                      css={css`
+                        appearance: none;
+                        border: none;
+                        background: none;
+                        padding: 0;
+                        font: inherit;
+                        cursor: pointer;
+                      `}
+                    >
+                      {t('Create a dataset')}
+                    </button>
+                    {t(' to edit or add columns and metrics.')}
+                  </>
+                }
+              />
+            </StyledInfoboxWrapper>
+          )}
+          <AutoSizer
+            renderProp={({ height }) => (
+              <DatasourceItems
+                width={width - BORDER_WIDTH}
+                height={height ?? 0}
+                folders={folders}
+              />
             )}
-          </Collapse.Panel>
-          <Collapse.Panel
-            header={<span className="header">{t('Columns')}</span>}
-            key="column"
-          >
-            <div className="field-length">
-              {t(`Showing %s of %s`, columnSlice.length, lists.columns.length)}
-            </div>
-            {columnSlice.map(col => (
-              <LabelContainer key={col.column_name} className="column">
-                {enableExploreDnd ? (
-                  <DatasourcePanelDragWrapper
-                    value={col}
-                    type={DndItemType.Column}
-                  >
-                    <StyledColumnOption column={col} showType />
-                  </DatasourcePanelDragWrapper>
-                ) : (
-                  <StyledColumnOption column={col} showType />
-                )}
-              </LabelContainer>
-            ))}
-            {lists.columns.length > DEFAULT_MAX_COLUMNS_LENGTH ? (
-              <ButtonContainer>
-                <Button onClick={() => setShowAllColumns(!showAllColumns)}>
-                  {showAllColumns ? t('Show Less...') : t('Show all...')}
-                </Button>
-              </ButtonContainer>
-            ) : (
-              <></>
-            )}
-          </Collapse.Panel>
-        </Collapse>
-      </div>
-    </>
+          />
+        </div>
+      </>
+    ),
+    [inputValue, datasourceIsSaveable, width, folders],
   );
 
   return (
     <DatasourceContainer>
+      {datasourceIsSaveable && showSaveDatasetModal && (
+        <SaveDatasetModal
+          visible={showSaveDatasetModal}
+          onHide={() => setShowSaveDatasetModal(false)}
+          buttonTextOnSave={t('Save')}
+          buttonTextOnOverwrite={t('Overwrite')}
+          datasource={getDatasourceAsSaveableDataset(datasource)}
+          openWindow={false}
+          formData={formData}
+        />
+      )}
+      {/* @ts-expect-error */}
       <Control {...datasourceControl} name="datasource" actions={actions} />
       {datasource.id != null && mainBody}
     </DatasourceContainer>

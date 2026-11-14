@@ -16,97 +16,70 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useState } from 'react';
-import { styled, withTheme, SupersetThemeProps, t } from '@superset-ui/core';
-import { PartialThemeConfig, Select } from 'src/components/Select';
-import { CardSortSelectOption, FetchDataConfig, SortColumn } from './types';
-import { filterSelectStyles } from './utils';
+import { useRef, useState } from 'react';
+import { t } from '@apache-superset/core/translation';
+import type { SelectOption } from './types';
+import { CardSortSelectOption, SortColumn } from './types';
+import CompactFilterTrigger from './Filters/CompactFilterTrigger';
+import CompactSelectPanel from './Filters/CompactSelectPanel';
+import type { FilterHandler } from './Filters/types';
 
-const SortTitle = styled.label`
-  font-weight: bold;
-  line-height: 27px;
-  margin: 0 0.4em 0 0;
-`;
-
-const SortContainer = styled.div`
-  display: inline-flex;
-  font-size: ${({ theme }) => theme.typography.sizes.s}px;
-  padding-top: ${({ theme }) => theme.gridUnit}px;
-  text-align: left;
-`;
 interface CardViewSelectSortProps {
-  onChange: (conf: FetchDataConfig) => any;
+  onChange: (value: SortColumn[]) => void;
   options: Array<CardSortSelectOption>;
   initialSort?: SortColumn[];
-  pageIndex: number;
-  pageSize: number;
 }
-
-interface StyledSelectProps {
-  onChange: (value: CardSortSelectOption) => void;
-  options: CardSortSelectOption[];
-  selectStyles: any;
-  theme: SupersetThemeProps['theme'];
-  value: CardSortSelectOption;
-}
-
-function StyledSelect({
-  onChange,
-  options,
-  selectStyles,
-  theme,
-  value,
-}: StyledSelectProps) {
-  const filterSelectTheme: PartialThemeConfig = {
-    spacing: {
-      baseUnit: 1,
-      fontSize: theme.typography.sizes.s,
-      minWidth: '5em',
-    },
-  };
-  return (
-    <Select
-      data-test="card-sort-select"
-      clearable={false}
-      onChange={onChange}
-      options={options}
-      stylesConfig={selectStyles}
-      themeConfig={filterSelectTheme}
-      value={value}
-    />
-  );
-}
-
-const StyledCardSortSelect = withTheme(StyledSelect);
 
 export const CardSortSelect = ({
   initialSort,
   onChange,
   options,
-  pageIndex,
-  pageSize,
 }: CardViewSelectSortProps) => {
-  const defaultSort =
-    initialSort && options.find(({ id }) => id === initialSort[0].id);
-  const [selectedOption, setSelectedOption] = useState<CardSortSelectOption>(
-    defaultSort || options[0],
-  );
+  const panelRef = useRef<FilterHandler>(null);
 
-  const handleOnChange = (selected: CardSortSelectOption) => {
-    setSelectedOption(selected);
-    const sortBy = [{ id: selected.id, desc: selected.desc }];
-    onChange({ pageIndex, pageSize, sortBy, filters: [] });
+  const defaultSort =
+    (initialSort &&
+      options.find(
+        ({ id, desc }) =>
+          id === initialSort[0].id && desc === initialSort[0].desc,
+      )) ||
+    options[0];
+
+  const [currentValue, setCurrentValue] = useState<SelectOption>({
+    label: defaultSort.label,
+    value: defaultSort.value,
+  });
+
+  const selectOptions = options.map(o => ({ label: o.label, value: o.value }));
+
+  const handleSelect = (option: SelectOption | undefined) => {
+    if (!option) return;
+    const original = options.find(o => o.value === option.value);
+    if (original) {
+      setCurrentValue({ label: original.label, value: original.value });
+      onChange([{ id: original.id, desc: original.desc }]);
+    }
   };
 
   return (
-    <SortContainer>
-      <SortTitle>{t('Sort:')}</SortTitle>
-      <StyledCardSortSelect
-        onChange={(value: CardSortSelectOption) => handleOnChange(value)}
-        options={options}
-        selectStyles={filterSelectStyles}
-        value={selectedOption}
-      />
-    </SortContainer>
+    <span data-test="card-sort-select">
+      <CompactFilterTrigger
+        label={t('Sort')}
+        hasValue={false}
+        onClear={() => {}}
+        tooltipTitle={String(currentValue.label)}
+      >
+        {({ isOpen, onClose }) => (
+          <CompactSelectPanel
+            ref={panelRef}
+            selects={selectOptions}
+            value={currentValue}
+            onSelect={handleSelect}
+            isOpen={isOpen}
+            onClose={onClose}
+          />
+        )}
+      </CompactFilterTrigger>
+    </span>
   );
 };

@@ -16,33 +16,83 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  KeyboardEvent,
+  memo,
+} from 'react';
+
 import { useDispatch, useSelector } from 'react-redux';
-import { uniqWith } from 'lodash';
+import { uniqWith } from 'lodash-es';
 import cx from 'classnames';
-import Icons from 'src/components/Icons';
-import { usePrevious } from 'src/common/hooks/usePrevious';
-import { DataMaskStateWithId } from 'src/dataMask/types';
+import { t } from '@apache-superset/core/translation';
+import {
+  DataMaskStateWithId,
+  DatasourceType,
+  Filters,
+  JsonObject,
+  usePrevious,
+} from '@superset-ui/core';
+import { styled } from '@apache-superset/core/theme';
+import { Icons } from '@superset-ui/core/components/Icons';
+import { setDirectPathToChild } from 'src/dashboard/actions/dashboardState';
+import { useChartLayoutItems } from 'src/dashboard/util/useChartLayoutItems';
+import { Badge } from '@superset-ui/core/components';
 import DetailsPanelPopover from './DetailsPanel';
-import { Pill } from './Styles';
 import {
   Indicator,
   IndicatorStatus,
   selectIndicatorsForChart,
   selectNativeIndicatorsForChart,
-} from './selectors';
-import { setDirectPathToChild } from '../../actions/dashboardState';
-import {
-  ChartsState,
-  DashboardInfo,
-  DashboardLayout,
-  RootState,
-} from '../../types';
-import { Filters } from '../../reducers/types';
+} from '../nativeFilters/selectors';
+import { Chart, RootState } from '../../types';
+import { useIsAutoRefreshing } from '../../contexts/AutoRefreshContext';
 
 export interface FiltersBadgeProps {
   chartId: number;
 }
+
+const StyledFilterCount = styled.button`
+  ${({ theme }) => `
+    appearance: none;
+    border: none;
+    font: inherit;
+    display: flex;
+    justify-items: center;
+    align-items: center;
+    cursor: pointer;
+    margin-right: ${theme.sizeUnit}px;
+    padding-left: ${theme.sizeUnit * 2}px;
+    padding-right: ${theme.sizeUnit * 2}px;
+    background: ${theme.colorBgContainer};
+    border-radius: 4px;
+    height: 100%;
+    .anticon {
+      vertical-align: middle;
+      color: ${theme.colorIcon};
+      &:hover {
+        color: ${theme.colorIconHover};
+      }
+    }
+
+    .incompatible-count {
+      font-size: ${theme.fontSizeSM}px;
+    }
+    &:focus-visible {
+      outline: 2px solid ${theme.colorPrimary};
+    }
+  `}
+`;
+
+const StyledBadge = styled(Badge)`
+  ${({ theme }) => `
+    margin-left: ${theme.sizeUnit * 2}px;
+  `}
+`;
 
 const sortByStatus = (indicators: Indicator[]): Indicator[] => {
   const statuses = [
@@ -57,30 +107,39 @@ const sortByStatus = (indicators: Indicator[]): Indicator[] => {
   );
 };
 
+const indicatorsInitialState: Indicator[] = [];
+
 export const FiltersBadge = ({ chartId }: FiltersBadgeProps) => {
   const dispatch = useDispatch();
-  const datasources = useSelector<RootState, any>(state => state.datasources);
-  const dashboardFilters = useSelector<RootState, any>(
-    state => state.dashboardFilters,
+  const isAutoRefreshing = useIsAutoRefreshing();
+  const datasources = useSelector<RootState, RootState['datasources']>(
+    state => state.datasources,
   );
+  const dashboardFilters = useSelector<
+    RootState,
+    RootState['dashboardFilters']
+  >(state => state.dashboardFilters);
   const nativeFilters = useSelector<RootState, Filters>(
     state => state.nativeFilters?.filters,
   );
-  const dashboardInfo = useSelector<RootState, DashboardInfo>(
-    state => state.dashboardInfo,
+  const chartConfiguration = useSelector<RootState, JsonObject>(
+    state => state.dashboardInfo.metadata?.chart_configuration,
   );
-  const charts = useSelector<RootState, ChartsState>(state => state.charts);
-  const present = useSelector<RootState, DashboardLayout>(
-    state => state.dashboardLayout.present,
-  );
+  const chart = useSelector<RootState, Chart>(state => state.charts[chartId]);
+  const chartLayoutItems = useChartLayoutItems();
   const dataMask = useSelector<RootState, DataMaskStateWithId>(
     state => state.dataMask,
   );
 
-  const [nativeIndicators, setNativeIndicators] = useState<Indicator[]>([]);
-  const [dashboardIndicators, setDashboardIndicators] = useState<Indicator[]>(
-    [],
+  const [nativeIndicators, setNativeIndicators] = useState<Indicator[]>(
+    indicatorsInitialState,
   );
+  const [dashboardIndicators, setDashboardIndicators] = useState<Indicator[]>(
+    indicatorsInitialState,
+  );
+  const [popoverVisible, setPopoverVisible] = useState(false);
+  const popoverContentRef = useRef<HTMLDivElement>(null);
+  const popoverTriggerRef = useRef<HTMLButtonElement>(null);
 
   const onHighlightFilterSource = useCallback(
     (path: string[]) => {
@@ -89,57 +148,121 @@ export const FiltersBadge = ({ chartId }: FiltersBadgeProps) => {
     [dispatch],
   );
 
-  const chart = charts[chartId];
-  const prevChartStatus = usePrevious(chart?.chartStatus);
-
-  const showIndicators = useCallback(
-    () =>
-      chart?.chartStatus && ['rendered', 'success'].includes(chart.chartStatus),
-    [chart.chartStatus],
-  );
-  useEffect(() => {
-    if (!showIndicators) {
-      setDashboardIndicators([]);
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'Enter') {
+      setPopoverVisible(true);
     }
-    if (prevChartStatus !== 'success') {
-      setDashboardIndicators(
-        selectIndicatorsForChart(chartId, dashboardFilters, datasources, chart),
-      );
+  };
+
+  const prevChart = usePrevious(chart);
+  const prevChartStatus = prevChart?.chartStatus;
+  const prevDashboardFilters = usePrevious(dashboardFilters);
+  const prevDatasources = usePrevious(datasources);
+  const showIndicators =
+    chart?.chartStatus && ['rendered', 'success'].includes(chart.chartStatus);
+
+  useEffect(() => {
+    if (popoverVisible) {
+      setTimeout(() => {
+        popoverContentRef?.current?.focus({ preventScroll: true });
+      });
+    }
+  }, [popoverVisible]);
+
+  useEffect(() => {
+    // During auto-refresh, don't clear indicators - preserve previous state
+    if (
+      !showIndicators &&
+      dashboardIndicators.length > 0 &&
+      !isAutoRefreshing
+    ) {
+      setDashboardIndicators(indicatorsInitialState);
+    } else if (prevChartStatus !== 'success') {
+      if (
+        chart?.queriesResponse?.[0]?.rejected_filters !==
+          prevChart?.queriesResponse?.[0]?.rejected_filters ||
+        chart?.queriesResponse?.[0]?.applied_filters !==
+          prevChart?.queriesResponse?.[0]?.applied_filters ||
+        dashboardFilters !== prevDashboardFilters ||
+        datasources !== prevDatasources
+      ) {
+        setDashboardIndicators(
+          selectIndicatorsForChart(
+            chartId,
+            dashboardFilters,
+            datasources,
+            chart,
+          ),
+        );
+      }
     }
   }, [
     chart,
     chartId,
     dashboardFilters,
+    dashboardIndicators.length,
     datasources,
+    isAutoRefreshing,
+    prevChart?.queriesResponse,
     prevChartStatus,
+    prevDashboardFilters,
+    prevDatasources,
     showIndicators,
   ]);
 
+  const prevNativeFilters = usePrevious(nativeFilters);
+  const prevChartLayoutItems = usePrevious(chartLayoutItems);
+  const prevDataMask = usePrevious(dataMask);
+  const prevChartConfig = usePrevious(chartConfiguration);
+
   useEffect(() => {
-    if (!showIndicators) {
-      setNativeIndicators([]);
-    }
-    if (prevChartStatus !== 'success') {
-      setNativeIndicators(
-        selectNativeIndicatorsForChart(
-          nativeFilters,
-          dataMask,
-          chartId,
-          chart,
-          present,
-          dashboardInfo.metadata?.chart_configuration,
-        ),
+    // During auto-refresh, don't clear indicators - preserve previous state
+    // Clear indicators when chart is loading/not showing (unless auto-refreshing)
+    const shouldReset =
+      !showIndicators && nativeIndicators.length > 0 && !isAutoRefreshing;
+
+    const shouldRecalculate =
+      chart?.queriesResponse?.[0]?.rejected_filters !==
+        prevChart?.queriesResponse?.[0]?.rejected_filters ||
+      chart?.queriesResponse?.[0]?.applied_filters !==
+        prevChart?.queriesResponse?.[0]?.applied_filters ||
+      nativeFilters !== prevNativeFilters ||
+      chartLayoutItems !== prevChartLayoutItems ||
+      dataMask !== prevDataMask ||
+      prevChartConfig !== chartConfiguration;
+
+    if (shouldReset) {
+      setNativeIndicators(indicatorsInitialState);
+    } else if (
+      showIndicators &&
+      (shouldRecalculate || nativeIndicators.length === 0)
+    ) {
+      const newIndicators = selectNativeIndicatorsForChart(
+        nativeFilters,
+        dataMask,
+        chartId,
+        chart,
+        chartLayoutItems,
+        chartConfiguration,
       );
+      setNativeIndicators(newIndicators);
     }
   }, [
     chart,
     chartId,
-    dashboardInfo.metadata?.chart_configuration,
+    chartConfiguration,
     dataMask,
+    isAutoRefreshing,
     nativeFilters,
-    present,
+    nativeIndicators.length,
+    prevChart?.queriesResponse,
+    prevChartConfig,
     prevChartStatus,
+    prevDataMask,
+    prevNativeFilters,
     showIndicators,
+    chartLayoutItems,
+    prevChartLayoutItems,
   ]);
 
   const indicators = useMemo(
@@ -155,67 +278,72 @@ export const FiltersBadge = ({ chartId }: FiltersBadgeProps) => {
     [dashboardIndicators, nativeIndicators],
   );
 
-  const appliedCrossFilterIndicators = indicators.filter(
-    indicator => indicator.status === IndicatorStatus.CrossFilterApplied,
+  const appliedCrossFilterIndicators = useMemo(
+    () =>
+      indicators.filter(
+        indicator => indicator.status === IndicatorStatus.CrossFilterApplied,
+      ),
+    [indicators],
   );
-  const appliedIndicators = indicators.filter(
-    indicator => indicator.status === IndicatorStatus.Applied,
+  const appliedIndicators = useMemo(
+    () =>
+      indicators.filter(
+        indicator => indicator.status === IndicatorStatus.Applied,
+      ),
+    [indicators],
   );
-  const unsetIndicators = indicators.filter(
-    indicator => indicator.status === IndicatorStatus.Unset,
-  );
-  const incompatibleIndicators = indicators.filter(
-    indicator => indicator.status === IndicatorStatus.Incompatible,
-  );
+  const filterCount =
+    appliedIndicators.length + appliedCrossFilterIndicators.length;
+  const incompatibleIndicators = chart?.form_data?.datasource?.endsWith(
+    `__${DatasourceType.SemanticView}`,
+  )
+    ? indicators.filter(
+        indicator => indicator.status === IndicatorStatus.Incompatible,
+      )
+    : [];
+  const totalFilterCount = filterCount + incompatibleIndicators.length;
 
-  if (
-    !appliedCrossFilterIndicators.length &&
-    !appliedIndicators.length &&
-    !incompatibleIndicators.length &&
-    !unsetIndicators.length
-  ) {
+  if (!totalFilterCount) {
     return null;
   }
-
-  const isInactive =
-    !appliedCrossFilterIndicators.length &&
-    !appliedIndicators.length &&
-    !incompatibleIndicators.length;
 
   return (
     <DetailsPanelPopover
       appliedCrossFilterIndicators={appliedCrossFilterIndicators}
       appliedIndicators={appliedIndicators}
-      unsetIndicators={unsetIndicators}
       incompatibleIndicators={incompatibleIndicators}
       onHighlightFilterSource={onHighlightFilterSource}
+      setPopoverVisible={setPopoverVisible}
+      popoverVisible={popoverVisible}
+      popoverContentRef={popoverContentRef}
+      popoverTriggerRef={popoverTriggerRef}
     >
-      <Pill
+      <StyledFilterCount
+        type="button"
+        aria-label={
+          incompatibleIndicators.length
+            ? t('Filters (%s)', totalFilterCount)
+            : t('Applied filters (%s)', filterCount)
+        }
+        aria-haspopup="true"
+        ref={popoverTriggerRef}
         className={cx(
           'filter-counts',
-          !!incompatibleIndicators.length && 'has-incompatible-filters',
           !!appliedCrossFilterIndicators.length && 'has-cross-filters',
-          isInactive && 'filters-inactive',
         )}
+        onKeyDown={handleKeyDown}
       >
-        <Icons.Filter iconSize="m" />
-        {!isInactive && (
-          <span data-test="applied-filter-count">
-            {appliedIndicators.length + appliedCrossFilterIndicators.length}
-          </span>
-        )}
-        {incompatibleIndicators.length ? (
-          <>
-            {' '}
-            <Icons.AlertSolid />
-            <span data-test="incompatible-filter-count">
-              {incompatibleIndicators.length}
-            </span>
-          </>
-        ) : null}
-      </Pill>
+        <Icons.FilterOutlined iconSize="m" />
+        <StyledBadge
+          data-test="applied-filter-count"
+          className="applied-count"
+          count={totalFilterCount}
+          size="small"
+          showZero
+        />
+      </StyledFilterCount>
     </DetailsPanelPopover>
   );
 };
 
-export default React.memo(FiltersBadge);
+export default memo(FiltersBadge);
